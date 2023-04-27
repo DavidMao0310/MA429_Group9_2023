@@ -2,7 +2,10 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LinearRegression
+from scipy.stats import shapiro
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
 from sklearn.model_selection import GridSearchCV, KFold, cross_validate
 from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_percentage_error
 from xgboost.sklearn import XGBRegressor
@@ -25,8 +28,15 @@ class Regression_models:
         self.x_train, self.x_test, self.y_train, self.y_test = x_train, x_test, y_train, y_test
         if standardlise:
             scaler = StandardScaler()
-            self.x_train = scaler.fit_transform(self.x_train)
-            self.x_test = scaler.transform(self.x_test)
+            numerical_cols = [col for col in self.features_names_list if self.x_train[col].nunique() > 5]
+            numerical_df_tr = train_df[numerical_cols]
+            numerical_df_te = test_df[numerical_cols]
+            transformed_numerical_tr = pd.DataFrame(scaler.fit_transform(numerical_df_tr), columns=numerical_cols)
+            transformed_numerical_te = pd.DataFrame(scaler.transform(numerical_df_te), columns=numerical_cols)
+            self.x_train = pd.concat(
+                [transformed_numerical_tr, self.x_train.drop(numerical_cols, axis=1)], axis=1)
+            self.x_test = pd.concat(
+                [transformed_numerical_te, self.x_test.drop(numerical_cols, axis=1)], axis=1)
         if (len(self.targert_names_list) == 1):
             # make target data in np.array
             self.y_train_old = self.y_train
@@ -51,6 +61,47 @@ class Regression_models:
             'MAPE': [mape]
         })
         return metrics_df.T
+
+    def linear_reg(self):
+        model = LinearRegression()
+        model.fit(self.x_train, self.y_train)
+        y_pred_tr = model.predict(self.x_train)
+        y_pred = model.predict(self.x_test)
+        residuals_train = self.y_train - y_pred_tr
+        residuals = self.y_test - y_pred
+        print('LR Train')
+        print(self.model_metrics(self.y_train, y_pred_tr))
+        print('LR Test')
+        print(self.model_metrics(self.y_test, y_pred))
+        # Check the assumptions
+        # 1. Linearity
+        # We can check the linearity assumption by calculating the R-squared
+        r2_train = r2_score(y_train, y_pred_tr)
+        r2_test = r2_score(y_test, y_pred)
+        print(f"R-squared (train): {r2_train}")
+        print(f"R-squared (test): {r2_test}")
+        # 2. Independence of errors
+        # We can check the independence of errors assumption by examining the residuals
+        print(f"Mean of residuals (train): {np.mean(residuals_train)}")
+        print(f"Mean of residuals (test): {np.mean(residuals)}")
+
+        # 3. Homoscedasticity
+        # We can check the homoscedasticity assumption by plotting the residuals vs. the predicted values
+        # and looking for a constant spread of points
+        fig, ax = plt.subplots(figsize=(8, 4))
+        ax.scatter(y_pred_tr, residuals_train)
+        ax.axhline(y=0, color='r', linestyle='-')
+        ax.set_xlabel('Predicted values')
+        ax.set_ylabel('Residuals')
+        plt.show()
+        # 4. Normality of residuals
+        # We can check the normality of residuals assumption by examining a histogram or using a normality test
+        plt.figure(figsize=(8, 4))
+        sns.histplot(residuals_train, kde=True)
+        plt.title('Histogram of residuals')
+        plt.show()
+        shapiro_test = shapiro(residuals_train)
+        print(f"Shapiro-Wilk test p-value: {shapiro_test[1]}")
 
     def XGBR(
             self,
@@ -115,7 +166,7 @@ class Regression_models:
         test_info_df = pd.DataFrame(
             {'true': list(self.y_test), 'pred': list(test_predictions)})
         if show_avsp:
-            plt.figure(figsize=(14, 6))
+            plt.figure(figsize=(18, 6))
             plt.scatter(
                 self.y_train,
                 train_predictions,
@@ -135,7 +186,7 @@ class Regression_models:
             plt.tight_layout()
             plt.show()
         if show_features_imp:
-            plt.figure(figsize=(14, 10))
+            plt.figure(figsize=(18, 8))
             sns.barplot(
                 y=self.features_names_list,
                 x=model.feature_importances_)
@@ -435,19 +486,22 @@ class Regression_models:
         print('XGBoost+NN test: ')
         print(metrics_df)
 
-# train_df = pd.read_csv('data/train.csv')
-# test_df = pd.read_csv('data/test.csv')
-# train_df = train_df.drop('baseFare' axis=1)
-# test_df = test_df.drop('baseFare', axis=1)
+
+train_df = pd.read_csv('data/train.csv')
+test_df = pd.read_csv('data/test.csv')
+train_df = train_df.drop('baseFare', axis=1)
+test_df = test_df.drop('baseFare', axis=1)
 # train_df = train_df.iloc[:100, :]
 # test_df = test_df.iloc[:10, :]
-# y_train = train_df[['totalFare']]
-# x_train = train_df.drop('totalFare', axis=1)
-# y_test = test_df[['totalFare']]
-# x_test = test_df.drop('totalFare', axis=1)
-# Reg_models = Regression_models(x_train, y_train, x_test, y_test, standardlise=True)
-# xgb_model = Reg_models.XGBR(searchCV=False, best_depth_input=10, best_Nestimators=200,
-# best_L1_alpha=1, show_avsp=False, show_features_imp=False)
+y_train = train_df[['totalFare']]
+x_train = train_df.drop('totalFare', axis=1)
+y_test = test_df[['totalFare']]
+x_test = test_df.drop('totalFare', axis=1)
+Reg_models = Regression_models(x_train, y_train, x_test, y_test, standardlise=True)
+# LR_model = Reg_models.linear_reg()
+#
+xgb_model = Reg_models.XGBR(searchCV=False, best_depth_input=10, best_Nestimators=200,
+best_L1_alpha=1, show_avsp=False, show_features_imp=False)
 
 # seq_NN = Reg_models.NN_sequential(loss_func='rmse', epoch_num=100, bmc_noise_var=220, huber_delta=1)
 # Reg_models.autoencoder_with_xgboost(best_parameters_normal={'n_estimators': 200, 'max_depth': 8,
